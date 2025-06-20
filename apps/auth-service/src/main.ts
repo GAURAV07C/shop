@@ -12,7 +12,10 @@ import swaggerUi from 'swagger-ui-express';
 const swaggerDocument = require('./swagger-output.json');
 const app = express();
 import redis from 'packages/libs/redis/index';
+
 app.use(cookieParser());
+
+app.use(express.json());
 
 redis.on('connect', () => {
   console.log('✅ Connected to Redis');
