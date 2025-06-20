@@ -4,10 +4,12 @@ import {
   sendOtp,
   tractOtpRequests,
   validateRegistrationData,
+  verifyOtp,
 } from '../utils/auth.helper';
 // import prisma from 'packages/libs/prisma/index';
 import { PrismaClient } from '../../../../generated/prisma/client';
 import { ValidationError } from 'packages/error-handler';
+import bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 // const prisma =[];
 export const userRegistration = async (
@@ -37,7 +39,7 @@ export const userRegistration = async (
     await tractOtpRequests(email, next); // Track OTP requests
     // Send OTP to the user's email
 
-    await sendOtp( name,email, 'user-activation-mail'); // Send OTP using the utility function
+    await sendOtp(name, email, 'user-activation-mail'); // Send OTP using the utility function
     // Respond with a success message
 
     res.status(200).json({
@@ -50,10 +52,13 @@ export const userRegistration = async (
   }
 };
 
-
-export const verifyUser = async (req: Request, res: Response, next: NextFunction) => {
-  try{
-    const {email , otp , password , name} = req.body;
+export const verifyUser = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { email, otp, password, name } = req.body;
 
     if (!email || !otp || !password || !name) {
       return next(new ValidationError('All fields are require.'));
@@ -67,10 +72,23 @@ export const verifyUser = async (req: Request, res: Response, next: NextFunction
       return next(new ValidationError('User already exists with this email!'));
     }
 
-    
+    await verifyOtp(email, otp, next); // Verify the OTP
+    const hashedPassword = await bcrypt.hash(password, 10); // Hash the password
 
+    await prisma.user.create({
+      data: {
+        name,
+        email,
+        password: hashedPassword,
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'User registered successfully!',
+    });
   } catch (error) {
     console.error('Error in user verification:', error);
     return next(error);
   }
-}
+};
