@@ -2,7 +2,8 @@ import crypto from 'crypto';
 import { ValidationError } from 'packages/error-handler';
 import redis from 'packages/libs/redis';
 import { sendEMail } from './sendMail';
-import { NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
+import prisma from 'packages/libs/prisma';
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -125,4 +126,82 @@ export const verifyOtp = async (email:string , otp:string , next: NextFunction )
   // If OTP is valid, delete it from Redis
   await redis.del(`otp:${email}` , failedAttemptsKey); // Reset failed attempts
 
+}
+
+
+export const handleForgotPassword = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+  userType: "user" | "seller"
+) => {
+  try {
+    const { email } = req.body as { email?: string };
+    if (!email) {
+      return next(new ValidationError('Email is required.'));
+    }
+
+    if (!emailRegex.test(email)) {
+      return next(new ValidationError('Invalid email format.'));
+    }
+
+    // Check if the user exists in the database
+    const user =  await prisma.user.findUnique({
+      where : { email },
+    })
+
+    if (!user) {
+      return next(new ValidationError(`${userType} not found with this email!`));
+    }
+
+    // check otp restriction
+    await cheakOtpRestriction(email, next);
+    // Track OTP requests
+    await tractOtpRequests(email, next);
+
+    // generate and send mail
+
+    await sendOtp(email, user.name, "forgot-password-user-mail" );
+
+    res.status(200).json({
+      message: `OTP sent successfully to ${email}. Please check your email to reset your password.`,
+    });
+
+
+
+  } catch (error) {
+    console.error('Error in handleForgotPassword:', error);
+    return next(error);
+  }
+}
+
+export const verifyForgetPassswordOtp = async (
+  req: Request, 
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { email, otp } = req.body ;
+
+    if (!email || !otp ) {
+      return next(new ValidationError('All fields are required.'));
+    }
+
+    if (!emailRegex.test(email)) {
+      return next(new ValidationError('Invalid email format.'));
+    }
+
+    // Verify the OTP
+    await verifyOtp(email, otp, next);
+
+        
+
+    res.status(200).json({
+      message: 'otp verified successfully. you can now reset your password.',
+    
+    });
+  } catch (error) {
+    console.error('Error in verifyForgetPassswordOtp:', error);
+    return next(error);
+  }
 }

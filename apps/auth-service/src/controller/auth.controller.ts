@@ -1,15 +1,20 @@
 import { NextFunction, Request, Response } from 'express';
 import {
   cheakOtpRestriction,
+  handleForgotPassword,
   sendOtp,
   tractOtpRequests,
   validateRegistrationData,
+  verifyForgetPassswordOtp,
   verifyOtp,
 } from '../utils/auth.helper';
 // import prisma from 'packages/libs/prisma/index';
 import { PrismaClient } from '../../../../generated/prisma/client';
-import { ValidationError } from 'packages/error-handler';
+import { AuthError, ValidationError } from 'packages/error-handler';
+
+import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { setCookie } from '../utils/cookies/setCookie';
 const prisma = new PrismaClient();
 // const prisma =[];
 export const userRegistration = async (
@@ -92,3 +97,146 @@ export const verifyUser = async (
     return next(error);
   }
 };
+
+export const loginUser = async ( req: Request, res: Response, next: NextFunction) => {
+  try{
+
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return next(new ValidationError('Email and password are required.'));
+  }
+
+  // Check if the user exists in the database
+  const user = await prisma.user.findUnique({
+    where: { email },
+  });
+
+  if (!user) {
+    return next(new ValidationError('User not found with this email!'));
+  }
+
+  // Compare the provided password with the stored hashed password
+
+  const isPasswordValid = await bcrypt.compare(password, user.password!);
+
+  if (!isPasswordValid) {
+    return next(new AuthError('Invalid email or password!'));
+  }
+
+  // Generate a JWT token for the user
+  const accessToken = jwt.sign(
+    { id: user.id, role:"user" },
+    process.env.ACCESS_TOKEN_SECRET as string || 'default_secret',
+    { expiresIn: '15m' } // Token expiration time  
+  );
+  // Generate a refresh token
+  const refreshToken = jwt.sign(
+    { id: user.id, role:"user" },
+    process.env.REFRESH_TOKEN_SECRET as string
+    || 'default_refresh_secret',
+    { expiresIn: '7d' } // Refresh token expiration time
+  );
+
+  // Store the refresh and  token in httpOnly  secure cookies
+
+  setCookie(res,"refresh_Token", refreshToken);
+  setCookie(res,"access_Token", accessToken);
+
+  res.status(200).json({
+    success: true,
+    message: 'User logged in successfully!',
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+    },
+    accessToken,
+    refreshToken,
+  });
+ 
+
+
+
+
+
+
+
+  } catch (error) {
+    console.error('Error in user login:', error);
+    return next(error);
+  }
+ }
+
+
+ export const userForgotPassword = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    await handleForgotPassword(req, res, next,'user');                                            
+
+  } catch (error) {
+    console.error('Error in user forgot password:', error);
+    return next(error);
+  }
+}
+
+// Verify OTP handler
+export const verifyUserForgotOtp = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  await verifyForgetPassswordOtp(req, res, next);
+};
+
+// Reset password handler
+
+export const resetUserPassword = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { email,  newPassword } = req.body;
+
+    if (!email || !newPassword) {
+      return next(new ValidationError('Email,  and new password are required.'));
+    }
+
+    // Check if the user exists in the database
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      return next(new ValidationError('User not found with this email!'));
+    }
+
+    // compare the new password with the stored hashed password
+    const isSamePassword = await bcrypt.compare(newPassword, user.password!);
+
+    if (isSamePassword) {
+      return next(new ValidationError('New password cannot be the same as the old password.'));
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    // Update the user's password in the database
+    await prisma.user.update({
+      where: { email },
+      data: { password: hashedPassword },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Password reset successfully! You can now log in with your new password.',
+    });
+
+
+  } catch (error) {
+    console.error('Error in reset user password:', error);
+    return next(error);
+  }
+}
