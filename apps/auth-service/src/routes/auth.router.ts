@@ -1,6 +1,16 @@
 import express, { Router } from 'express';
-import { loginUser, refereshToken, resetUserPassword, userForgotPassword, userRegistration, verifyUser } from '../controller/auth.controller';
-import { verifyForgetPassswordOtp } from '../utils/auth.helper';
+import {
+    getUser,
+  loginUser,
+  refereshToken,
+  resetUserPassword,
+  userForgotPassword,
+  userRegistration,
+  verifyUser,
+  verifyUserForgotPassword,
+} from '../controller/auth.controller';
+import isAuthenticated from 'packages/middleware/isAuthenticated';
+
 
 const router: Router = express.Router();
 
@@ -12,8 +22,10 @@ router.post('/forgot-password-user',userForgotPassword);
 
 router.post('/refresh-token-user', refereshToken);
 
+router.get('/logged-in-user', isAuthenticated, getUser);
+
 router.post('/reset-password-user', resetUserPassword);
 
-router.post('/verify-forgot-password-user', verifyForgetPassswordOtp);
+router.post('/verify-forgot-password-user', verifyUserForgotPassword);
 
 export default router;

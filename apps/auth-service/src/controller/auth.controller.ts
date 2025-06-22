@@ -211,6 +211,30 @@ export const refereshToken = async (
   }
 };
 
+// get logged in user details
+
+export const getUser = async (
+  req: any,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+
+    const user = req.user; // Assuming user is attached to req by authentication middleware
+
+    res.status(200).json({
+      success: true,
+      message: 'User details retrieved successfully!',
+      user,
+    });
+   
+    
+  } catch (error) {
+    console.error('Error in get user details:', error);
+    return next(error);
+  }
+};
+
 // Forgot password handler
 
 export const userForgotPassword = async (
@@ -227,7 +251,7 @@ export const userForgotPassword = async (
 };
 
 // Verify OTP handler
-export const verifyUserForgotOtp = async (
+export const verifyUserForgotPassword = async (
   req: Request,
   res: Response,
   next: NextFunction
