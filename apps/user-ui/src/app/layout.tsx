@@ -1,5 +1,6 @@
 import './global.css';
 import Header from '../shared/widgets/header';
+import Providers from './providers';
 
 export const metadata = {
   title: 'Eshop',
@@ -14,10 +15,16 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
+        <Providers>
+
+       
         
         <Header />
 
-        {children}</body>
+        {children}
+        
+      </Providers>
+         </body>
     </html>
   );
 }

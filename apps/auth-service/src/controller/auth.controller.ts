@@ -12,7 +12,7 @@ import {
 import { PrismaClient } from '../../../../generated/prisma/client';
 import { AuthError, ValidationError } from 'packages/error-handler';
 
-import jwt from 'jsonwebtoken';
+import jwt, { JsonWebTokenError } from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { setCookie } from '../utils/cookies/setCookie';
 const prisma = new PrismaClient();
@@ -98,89 +98,133 @@ export const verifyUser = async (
   }
 };
 
-export const loginUser = async ( req: Request, res: Response, next: NextFunction) => {
-  try{
-
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return next(new ValidationError('Email and password are required.'));
-  }
-
-  // Check if the user exists in the database
-  const user = await prisma.user.findUnique({
-    where: { email },
-  });
-
-  if (!user) {
-    return next(new ValidationError('User not found with this email!'));
-  }
-
-  // Compare the provided password with the stored hashed password
-
-  const isPasswordValid = await bcrypt.compare(password, user.password!);
-
-  if (!isPasswordValid) {
-    return next(new AuthError('Invalid email or password!'));
-  }
-
-  // Generate a JWT token for the user
-  const accessToken = jwt.sign(
-    { id: user.id, role:"user" },
-    process.env.ACCESS_TOKEN_SECRET as string || 'default_secret',
-    { expiresIn: '15m' } // Token expiration time  
-  );
-  // Generate a refresh token
-  const refreshToken = jwt.sign(
-    { id: user.id, role:"user" },
-    process.env.REFRESH_TOKEN_SECRET as string
-    || 'default_refresh_secret',
-    { expiresIn: '7d' } // Refresh token expiration time
-  );
-
-  // Store the refresh and  token in httpOnly  secure cookies
-
-  setCookie(res,"refresh_Token", refreshToken);
-  setCookie(res,"access_Token", accessToken);
-
-  res.status(200).json({
-    success: true,
-    message: 'User logged in successfully!',
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-    },
-    accessToken,
-    refreshToken,
-  });
- 
-
-
-
-
-
-
-
-  } catch (error) {
-    console.error('Error in user login:', error);
-    return next(error);
-  }
- }
-
-
- export const userForgotPassword = async (
+export const loginUser = async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
   try {
-    await handleForgotPassword(req, res, next,'user');                                            
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return next(new ValidationError('Email and password are required.'));
+    }
 
+    // Check if the user exists in the database
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      return next(new ValidationError('User not found with this email!'));
+    }
+
+    // Compare the provided password with the stored hashed password
+
+    const isPasswordValid = await bcrypt.compare(password, user.password!);
+
+    if (!isPasswordValid) {
+      return next(new AuthError('Invalid email or password!'));
+    }
+
+    // Generate a JWT token for the user
+    const accessToken = jwt.sign(
+      { id: user.id, role: 'user' },
+      (process.env.ACCESS_TOKEN_SECRET as string) || 'default_secret',
+      { expiresIn: '15m' } // Token expiration time
+    );
+    // Generate a refresh token
+    const refreshToken = jwt.sign(
+      { id: user.id, role: 'user' },
+      (process.env.REFRESH_TOKEN_SECRET as string) || 'default_refresh_secret',
+      { expiresIn: '7d' } // Refresh token expiration time
+    );
+
+    // Store the refresh and  token in httpOnly  secure cookies
+
+    setCookie(res, 'refresh_Token', refreshToken);
+    setCookie(res, 'access_Token', accessToken);
+
+    res.status(200).json({
+      success: true,
+      message: 'User logged in successfully!',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+      },
+      accessToken,
+      refreshToken,
+    });
+  } catch (error) {
+    console.error('Error in user login:', error);
+    return next(error);
+  }
+};
+
+export const refereshToken = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const refreshToken = req.cookies.referesh_token;
+
+    if (!refreshToken) {
+      return next(new ValidationError('unauthorized! No refresh token.'));
+    }
+
+    // Verify the refresh token
+    const decoded = jwt.verify(
+      refreshToken,
+      process.env.REFRESH_TOKEN_SECRET as string
+    ) as { id: string; role: string };
+
+    if (!decoded || !decoded.id || !decoded.role) {
+      return next(new JsonWebTokenError('Invalid refresh token.'));
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+    });
+
+    if (!user) {
+      return next(new AuthError('Forbidden! User/Seller not found.'));
+    }
+
+    // Generate a new access token
+    const newAccessToken = jwt.sign(
+      { id: decoded.id, role: decoded.role },
+      process.env.ACCESS_TOKEN_SECRET as string,
+      { expiresIn: '15m' }
+    );
+
+    setCookie(res, 'access_Token', newAccessToken);
+
+    res.status(200).json({
+      success: true,
+      message: 'Access token refreshed successfully!',
+      accessToken: newAccessToken,
+    });
+  } catch (error) {
+    console.error('Error in user refresh token:', error);
+    return next(error);
+  }
+};
+
+// Forgot password handler
+
+export const userForgotPassword = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    await handleForgotPassword(req, res, next, 'user');
   } catch (error) {
     console.error('Error in user forgot password:', error);
     return next(error);
   }
-}
+};
 
 // Verify OTP handler
 export const verifyUserForgotOtp = async (
@@ -199,10 +243,12 @@ export const resetUserPassword = async (
   next: NextFunction
 ) => {
   try {
-    const { email,  newPassword } = req.body;
+    const { email, newPassword } = req.body;
 
     if (!email || !newPassword) {
-      return next(new ValidationError('Email,  and new password are required.'));
+      return next(
+        new ValidationError('Email,  and new password are required.')
+      );
     }
 
     // Check if the user exists in the database
@@ -218,7 +264,11 @@ export const resetUserPassword = async (
     const isSamePassword = await bcrypt.compare(newPassword, user.password!);
 
     if (isSamePassword) {
-      return next(new ValidationError('New password cannot be the same as the old password.'));
+      return next(
+        new ValidationError(
+          'New password cannot be the same as the old password.'
+        )
+      );
     }
 
     // Hash the new password
@@ -231,12 +281,11 @@ export const resetUserPassword = async (
 
     res.status(200).json({
       success: true,
-      message: 'Password reset successfully! You can now log in with your new password.',
+      message:
+        'Password reset successfully! You can now log in with your new password.',
     });
-
-
   } catch (error) {
     console.error('Error in reset user password:', error);
     return next(error);
   }
-}
+};
